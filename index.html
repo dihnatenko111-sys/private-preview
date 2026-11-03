@@ -52,21 +52,37 @@
     return out;
   }
 
-  async function download(url, weight, base) {
+  // Кількість частин кожного файлу (великі файли розбиті, бо GitHub не приймає файли понад 100 МБ).
+  var PARTS = [1,1,1,2];
+
+  async function downloadOne(url, onProgress) {
     var res = await fetch(url);
     if (!res.ok) throw new Error(url + ": " + res.status);
-    var total = +res.headers.get("Content-Length") || 0;
-    if (!res.body || !total) return new Uint8Array(await res.arrayBuffer());
+    if (!res.body) return new Uint8Array(await res.arrayBuffer());
     var reader = res.body.getReader(), chunks = [], got = 0;
     for (;;) {
       var step = await reader.read();
       if (step.done) break;
       chunks.push(step.value);
       got += step.value.length;
-      bar.style.width = Math.min(100, base + (got / total) * weight) + "%";
+      onProgress(step.value.length);
     }
     var all = new Uint8Array(got), at = 0;
     chunks.forEach(function (c) { all.set(c, at); at += c.length; });
+    return all;
+  }
+
+  async function download(url, weight, base) {
+    var index = +url.match(/(\d+)\.bin$/)[1], count = PARTS[index] || 1, got = 0;
+    var expected = count * 40 * 1024 * 1024;
+    var pieces = [];
+    for (var p = 0; p < count; p++)
+      pieces.push(await downloadOne(url + "." + p, function (n) {
+        got += n;
+        bar.style.width = Math.min(100, base + Math.min(1, got / expected) * weight) + "%";
+      }));
+    var size = pieces.reduce(function (s, x) { return s + x.length; }, 0), all = new Uint8Array(size), at = 0;
+    pieces.forEach(function (x) { all.set(x, at); at += x.length; });
     return all;
   }
 
